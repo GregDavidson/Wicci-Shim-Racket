@@ -16,4 +16,6 @@ This Wicci Shim is written in Racket, a remarkably clean and
 powerful descendent of Scheme, a modern Lisp.  While this
 Shim has more overhead than the Rust Shim in development, it
 has nearly all of the desired features with much less code
-and complexity.
+and complexity.  It is a testament to the extreme flexibility
+of the [[https://www.racket-lang.org/][Racket Language]] that their Web Framework
+can be used in a manner so different from its original design.
