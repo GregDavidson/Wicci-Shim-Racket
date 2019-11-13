@@ -1,14 +1,16 @@
-# Wicci Shim
+* Wicci Shim
 
-An HTTP reverse-proxy server which bridges between a client's browser
-and a PostgreSQL-based Wicci Web Server.  A key component of the NGender
-Web Framework.
+An HTTP reverse-proxy server which bridges between a
+client's browser and a PostgreSQL-based [[https://gregdavidson.github.io/wicci-core-S0_lib/][Wicci System]].  A key
+component of the NGender Web Framework.
 
 Several Wicci Shims have been written, starting with one
-written in C.  The most ambitious is currently being written
-in Rust.  The Rust Shim eschews most of the cost of
-unsuitable concurrency, database and web frameworks and
-libraries and should eventually replace all others.
+written in C.  The most ambitious is the Wicci-Shim-Rust.
+The Rust Shim eschews most of the cost of unsuitable
+concurrency, database and web frameworks and libraries and
+should eventually replace all others.  Alas, it is far from
+done, primarily because of the unsuitability of all of the
+existing Rust Web Frameworks!
 
 This Wicci Shim is written in Racket, a remarkably clean and
 powerful descendent of Scheme, a modern Lisp.  While this
