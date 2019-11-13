@@ -286,14 +286,14 @@
 ; Log a bad request which failed 
 (define (log-web-request req)
   ; How well will this work if some of it is binary?
-  (displayln "Something went wrong with this request:\n")
+  (displayln "Something went wrong with this request:")
   (pretty-print req #:newline #t)
 )
 
 (define (log-wicci-rows rows)
   ; These are only the problematic rows.
   ; We need to provide context.
-  (displayln "Something went wrong with these rows:\n")
+  (displayln "Something went wrong with these rows:")
   (pretty-print rows #:newline #t)
 )
 
