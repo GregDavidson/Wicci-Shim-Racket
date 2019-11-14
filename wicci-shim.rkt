@@ -119,8 +119,13 @@
 
 ;; ** Preparing Client Data for Wicci
 
-; Recreate the hunk of bytes the client sent
-; which got parsed apart by the Racket Web Server
+; Recreate the hunk of bytes the client sent which got
+; parsed apart by the Racket Web Server.  Octets other than
+; US-ASCII have no official interpretation.  There is a mime
+; encoding and a JSON encoding which fit within a US-ASCII
+; character set.  Non-US-ASCII octets and encoded characters
+; can be interpreted by the Wicci if it considers it
+; meaningful to do so!
 (define (headers->bytes method uri headers-list)
   (let ([out (open-output-bytes)])
     (write-bytes method out)
@@ -136,18 +141,51 @@
 
 ;; ** Preparing Wicci Response for Client
 
-; Returns s as an exact integer or #f
-; Expensive?? Parsing a general number!!
+; Returns s as an exact integer or #f.
+; Parsing a general number seems expensive!!
 (define (string->integer s)
   (let ( [n (string->number s 10 'number-or-false)] )
     (and (integer? n) (inexact->exact n)) ) )
 
-; Return the value of a wicci response row as a unicode string
+; Return the value of a non-body row as a string value.
+; The Wicci should be giving us US-ASCII for header values
+; which if provided as a byte-string will satisfy a latin-1
+; encoding.  It's an error to call this on a body row!!
 (define (wicci-row-string row)
     ; header-name text-value bytes-value
-  (let* ( [less1 (cdr row)] [text-val (car less1)] [less2 (cdr less1)] [bytes-val (car less2)] )
+  (let* ( [less1 (cdr row)] [text-val (car less1)]
+          [less2 (cdr less1)] [bytes-val (car less2)]
+          [header (car row)] )
     ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
-    (if (non-empty-string? text-val) text-val (bytes->string/utf-8 bytes-val)) ) )
+    (if (non-empty-string? text-val)
+        text-val
+        (if (string-prefix? header "_body")
+            (begin
+              (log-wicci-row row "wicci-row-string can't convert this!")
+              "" )
+            (bytes->string/latin-1 bytes-val) ) ) ) )
+
+; Return the value of a body-row as a string if possible or
+; log a failure and return "".
+; Body byte-strings might be encoded any which way.
+; Currently we only use this function for debugging and
+; maybe error reports to console, so it should be moot.
+; Is this still true??
+(define (wicci-body-row-string row content-type)
+  ; header-name text-value bytes-value
+  (let* ( [less1 (cdr row)]     [text-val (car less1)]
+          [less2 (cdr less1)]   [bytes-val (car less2)]
+          [header (car row)]
+          [log (λ (msg) (log-wicci-row row (format "~a: ~a" wicci-body-row-string msg)))] )
+    ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
+    (cond [(non-empty-string? text-val) text-val]
+          [(not content-type) (log "No content-type!") ""]
+          [(not (string-prefix? header" _body")) (log "Not a body row!") ""]
+          [(regexp-match-positions #rx"charset-latin-1$" content-type)
+           (bytes->string/latin-1 bytes-val) ]
+          [(regexp-match-positions #rx"charset-utf-8$" content-type)
+           (bytes->string/utf-8 bytes-val) ]
+          [else (log "can't convert this!") "" ] ) ) )
 
 ; Return the value of a wicci response row as a byte-string
 (define (wicci-row-bytes row)
@@ -156,7 +194,7 @@
     ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
     (if (non-empty-string? text-val) (string->bytes/utf-8 text-val) bytes-val) ) )
 
-; Return the value of a wicci response row as an integer or #f
+; Return the value of a wicci response row as an integer or #f.
 ; Expensive?? Possibly generating a temporary string!!
 ; Not currently used!!
 (define (wicci-row-integer row)
@@ -168,16 +206,20 @@
     (map (λ (row) (make-header (string->bytes/utf-8 (car row)) (wicci-row-bytes row))) hdr-rows) ) )
 
 ; Return Wicci header rows by their header name
+; Can we count on header name case being normalized??
+; To lower-cabob-case or to Camel-Kabob-Case??
+; We are assuming the Wicci trims its row fields!!
 (define (wicci-header-rows header rows)
-  (findf (λ (row) (equal? header (car row))) rows) )
+  (findf (λ (row) (string-ci=? header (car row))) rows) )
 
-; Return the first Wicci header row by its header name
-; logs any duplicates
+; Return the first Wicci header row by its header name;
+; logs any duplicates!
 (define (wicci-header-row header rows)
   (let ([rows (wicci-header-rows header rows)])
     (and (pair? rows)
          (begin
-           (when (pair? (cdr rows)) (log-wicci-rows rows))
+           (when (pair? (cdr rows))
+             (log-wicci-rows rows "wicci-header-row unexpected duplicate(s)!") )
            (car rows) ) ) ) )
 
 ; Return the list of Wicci body rows
@@ -252,17 +294,27 @@
                  `(tr (td ,(first row)) (td ,(second row)) (td ,(third row))) )
                hdr-rows ) ) ) )
 
-(define (wicci-body-rows->xexpr rows)
-  (let ([hdr-rows (filter (λ (row) (string-prefix? (car row) "_body")) rows)])
-    `(dl ,@(foldr
-               (λ (row accum)
-                 (cons `(dt ,(first row)) (cons `(dd ,(wicci-row-string row)) accum)) )
-               '() hdr-rows ) ) ) )
+; Convert any body rows into xexpr-encoded html.
+; Only intended for debugging of simple responses in a case
+; where the Content-Type is text/html. 
+(define (wicci-body-rows->xexpr rows content-type-row)
+  (if (not content-type-row)
+      "No Content-Type Row!"
+      (let ( [content-type (wicci-row-string content-type-row)] )
+        (cond [(not (non-empty-string? content-type)) "No Content-Type!"]
+              [(not (string-prefix? content-type "text/html")) "Not text/html!" ]
+              [else
+               (let ([hdr-rows (filter (λ (row) (string-prefix? (car row) "_body")) rows)])
+                 `(dl ,@(foldr
+                         (λ (row accum)
+                           (cons `(dt ,(first row))
+                                 (cons `(dd ,(wicci-body-row-string row content-type)) accum) ) )
+                         '() hdr-rows ) ) ) ] ) ) ) )
 
-(define (wicci-response->xexpr rows)
+(define (wicci-response->xexpr rows content-type-row)
   `( (h2 "The Response We Received From The Wicci Database")
      ,@(wicci-header-rows->xexpr rows)
-     ,@(wicci-body-rows->xexpr rows) ) )
+     ,@(wicci-body-rows->xexpr rows content-type-row) ) )
 
 ;; ** Error Reporting
 
@@ -290,11 +342,17 @@
   (pretty-print req #:newline #t)
 )
 
-(define (log-wicci-rows rows)
+(define (log-wicci-rows rows [message #f])
   ; These are only the problematic rows.
   ; We need to provide context.
-  (displayln "Something went wrong with these rows:")
+  (displayln (or message "Something went wrong with these rows:"))
   (pretty-print rows #:newline #t)
+)
+
+(define (log-wicci-row row [message #f])
+  ; We need to provide context.
+  (displayln (or message "Something went wrong with this row:"))
+  (pretty-print row #:newline #t)
 )
 
 ; Create content for an error page to be sent to the user.
@@ -345,14 +403,18 @@
               (let* ( [response-status-parts (wicci-status-row-parts rows)]
                      [status-code (string->integer (second response-status-parts))]
                      [status-msg (third response-status-parts)]
-                     [response-headers (wicci-rows-headers rows)] )
+                     [response-headers (wicci-rows-headers rows)]
+                     [content-type-row (wicci-header-row "content-type" rows)]
+                     )
                 (if (not (and status-code status-msg response-headers)) ; we need these things!
                     (response/full
                      500 "Database Error"
                      (current-seconds) TEXT/HTML-MIME-TYPE
                      '()
                      (xexpr->content #:title/h1 "Wicci Database Error"
-                                     (xexpr-join (request->xexpr req) )  (wicci-response->xexpr rows) ) )
+                                     (xexpr-join
+                                      (request->xexpr req)
+                                      (wicci-response->xexpr rows content-type-row) ) ) )
                     ; OK, everything looks fine, let's send our response
                     (response/full
                      status-code status-msg
