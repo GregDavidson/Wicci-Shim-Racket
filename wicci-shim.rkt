@@ -103,14 +103,14 @@
 ; db-stmt: a prepared statement, automagically prepared in current db
 (define (open-db)
   (db-pool (connection-pool
-            (lambda ()
+            (λ ()
               (let ([pgc (postgresql-connect #:user (db-user) #:database (db-name))])
                 (let ([value (query-value pgc (db-init-func-cmd))])
                   (when (debug-mode) (displayln value)) )
                 pgc ) ) ))
   (db (virtual-connection (db-pool)))
   (db-stmt (virtual-statement
-            (lambda (dbc)
+            (λ (dbc)
               (case (dbsystem-name dbc)
                 ((postgresql) (db-func-cmd))
                 (else error "unknown database system") ) ) )) )
@@ -164,12 +164,12 @@
 
 ; Return the regular header rows from the Wicci as a list of header structures
 (define (wicci-rows-headers rows)
-  (let ([hdr-rows (filter (lambda (row) (not (string-prefix? (car row) "_"))) rows)])
-    (map (lambda (row) (make-header (string->bytes/utf-8 (car row)) (wicci-row-bytes row))) hdr-rows) ) )
+  (let ([hdr-rows (filter (λ (row) (not (string-prefix? (car row) "_"))) rows)])
+    (map (λ (row) (make-header (string->bytes/utf-8 (car row)) (wicci-row-bytes row))) hdr-rows) ) )
 
 ; Return Wicci header rows by their header name
 (define (wicci-header-rows header rows)
-  (findf (lambda (row) (equal? header (car row))) rows) )
+  (findf (λ (row) (equal? header (car row))) rows) )
 
 ; Return the first Wicci header row by its header name
 ; logs any duplicates
@@ -182,7 +182,7 @@
 
 ; Return the list of Wicci body rows
 (define (wicci-body-rows header rows)
-  (filter (lambda (row) (string-prefix? (car row) "_body")) rows) )
+  (filter (λ (row) (string-prefix? (car row) "_body")) rows) )
 
 ; Translate a wicci body row to bytes suitable for respond/full
 (define (wicci-body-row-bytes row)
@@ -217,7 +217,7 @@
        (dl (dt "Method") (dd ,method)
            (dt "URI") (dd ,uri)
            ,@(foldr
-              (lambda (hv lst)
+              (λ (hv lst)
                 (cons (list 'dt (bytes->string/utf-8 (header-field hv)))
                       (cons (list 'dd (bytes->string/utf-8 (header-value hv))) lst) ) )
               '() (request-headers/raw req) )
@@ -246,16 +246,16 @@
             (list-or-defaults (string-split wicci-status) defaults) ) ) ) ) )
 
 (define (wicci-header-rows->xexpr rows)
-  (let ([hdr-rows (filter (lambda (row) (not (string-prefix? (car row) "_body"))) rows)])
+  (let ([hdr-rows (filter (λ (row) (not (string-prefix? (car row) "_body"))) rows)])
     `(table ,@(foldr
-               (lambda (row)
+               (λ (row)
                  `(tr (td ,(first row)) (td ,(second row)) (td ,(third row))) )
                hdr-rows ) ) ) )
 
 (define (wicci-body-rows->xexpr rows)
-  (let ([hdr-rows (filter (lambda (row) (string-prefix? (car row) "_body")) rows)])
+  (let ([hdr-rows (filter (λ (row) (string-prefix? (car row) "_body")) rows)])
     `(dl ,@(foldr
-               (lambda (row accum)
+               (λ (row accum)
                  (cons `(dt ,(first row)) (cons `(dd ,(wicci-row-string row)) accum)) )
                '() hdr-rows ) ) ) )
 
@@ -524,8 +524,8 @@
 
 (define tests
   (list
-   (cons 'echo-server (lambda () (httpd echo-responder)))
-   (cons 'greg-db (lambda () (test-in-greg test-db-query))) ) )
+   (cons 'echo-server (λ () (httpd echo-responder)))
+   (cons 'greg-db (λ () (test-in-greg test-db-query))) ) )
 
 (define (run name)
   (let ( [pair (assoc name tests)] )
