@@ -3,6 +3,7 @@
 ; A Wicci Shim in Racket
 ; Exploiting a subset of Racket's Web-Server's features
 ; Consider converting this to Typed Racket!!
+; In Racket, λ is the same as lambda, finally!
 
 ;; * External Modules
 
