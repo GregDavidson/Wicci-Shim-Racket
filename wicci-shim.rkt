@@ -22,47 +22,53 @@
 (require web-server/servlet)
 (require web-server/servlet-env)
 
+;; * Macros
+
+; Notice our lexical convention of ending macro names with a colon:
+
+(define-syntax-rule (param: parameter-name initial-value)
+  (define parameter-name (make-parameter initial-value)) )
+
+(param: debug-mode #f)
+
+; How can we include filename and line number??
+(define-syntax-rule (debug: exp ...)
+  (when (debug-mode)
+    (printf "~a -> ~s~n" 'exp exp) ... ) )
+
 ;; * Parameters
 
 ; Global parameters, functions simulating dynamic (not lexical) bindings.
 ; If it weren't for wanting to run tests without having to restart everything
 ; we could use simple global variables with define and set!.  Overengineered??
-(define debug-mode (make-parameter #f)) ; show extra output
-(define echo-mode (make-parameter #f))
-(define repl-mode (make-parameter #f))
-(define test-name (make-parameter ""))
-(define http-port (make-parameter 8080))
-(define db-init-func (make-parameter "wicci_ready"))
-(define db-init-func-format (make-parameter "SELECT ~a()"))
-(define db-init-func-cmd (make-parameter (format (db-init-func-format) (db-init-func))))
-(define db-func (make-parameter "wicci_serve"))
-(define db-func-format (make-parameter "SELECT h,v,b FROM ~a($1,$2,'_body_bin') AS _(h,v,b)"))
-(define db-func-cmd (make-parameter (format (db-func-format) (db-func))))
-(define db-user (make-parameter (getenv "USER")))
-(define db-name (make-parameter "wicci1"))
+; (param: debug-mode #f) ; moved into macro section above!
+(param: echo-mode #f)
+(param: repl-mode #f)
+(param: test-name "")
+(param: http-port 8080)
+(param: db-init-func "wicci_ready")
+(param: db-init-func-format "SELECT ~a()")
+(param: db-init-func-cmd (format (db-init-func-format) (db-init-func)))
+(param: db-func "wicci_serve")
+(param: db-func-format "SELECT h,v,b FROM ~a($1,$2,'_body_bin') AS _(h,v,b)")
+(param: db-func-cmd (format (db-func-format) (db-func)))
+(param: db-user (getenv "USER"))
+(param: db-name "wicci1")
 ; these are initialized by open-db below
-(define db (make-parameter #f))
-(define db-pool (make-parameter #f))
-(define db-stmt (make-parameter #f))
+(param: db #f)
+(param: db-pool #f)
+(param: db-stmt #f)
 
 ; It would really be nice to be able to show only non-default parameters
 ; but that would suggest I add another level of abstraction and get rid
 ; of the enormous amount of redundancy I'm currently having with parameters
 ; in this program which until recently was so beautifully concise -jgd!!
 (define (show-parameters)
-  (printf "debug-mode: ~s~n" (debug-mode))
-  (printf "echo-mode: ~s~n" (echo-mode))
-  (printf "repl-mode: ~s~n" (repl-mode))
-  (printf "test-mode: ~s~n" (test-name))
-  (printf "http-port: ~s~n" (http-port))
-  (printf "db-init-func: ~s~n" (db-init-func))
-  (printf "db-init-func-format: ~s~n" (db-init-func-format))
-  (printf "db-init-func-cmd: ~s~n" (db-init-func-cmd))
-  (printf "db-func: ~s~n" (db-func))
-  (printf "db-func-format: ~s~n" (db-func-format))
-  (printf "db-func-cmd: ~s~n" (db-func-cmd))
-  (printf "db-user: ~s~n" (db-user))
-  (printf "db-name: ~s~n" (db-name)) )
+  (debug: (debug-mode) (echo-mode) (repl-mode)
+          (test-name)   (http-port)   (db-init-func)
+          (db-init-func-format)   (db-init-func-cmd)   (db-func)
+          (db-func-format)   (db-func-cmd)   (db-user)
+          (db-name) ) )
 
 ;; * Program
 
@@ -105,8 +111,8 @@
   (db-pool (connection-pool
             (λ ()
               (let ([pgc (postgresql-connect #:user (db-user) #:database (db-name))])
-                (let ([value (query-value pgc (db-init-func-cmd))])
-                  (when (debug-mode) (displayln value)) )
+                (let ([db-init-func (query-value pgc (db-init-func-cmd))])
+                  (debug: db-init-func) )
                 pgc ) ) ))
   (db (virtual-connection (db-pool)))
   (db-stmt (virtual-statement
@@ -126,11 +132,11 @@
 ; character set.  Non-US-ASCII octets and encoded characters
 ; can be interpreted by the Wicci if it considers it
 ; meaningful to do so!
-(define (headers->bytes method uri headers-list)
+(define (headers->bytes method-bytes uri headers-list)
   (let ([out (open-output-bytes)])
-    (write-bytes method out)
+    (write-bytes method-bytes out)
     (write-bytes #" " out)
-    (write-bytes uri out)
+    (write-bytes (string->bytes/latin-1 uri) out)
     (write-bytes #" HTTP/1.1\r\n") ; perhaps a fabrication!!
     (for ([hv headers-list])
       (write-bytes (header-field hv) out)
@@ -139,7 +145,8 @@
       (write-bytes #"\r\n" out) )
     (get-output-bytes out) ) )
 
-;; ** Preparing Wicci Response for Client
+;; ** Wicci Responder
+;; *** Wicci Response Row Support
 
 ; Returns s as an exact integer or #f.
 ; Parsing a general number seems expensive!!
@@ -153,9 +160,9 @@
 ; encoding.  It's an error to call this on a body row!!
 (define (wicci-row-string row)
     ; header-name text-value bytes-value
-  (let* ( [less1 (cdr row)] [text-val (car less1)]
-          [less2 (cdr less1)] [bytes-val (car less2)]
-          [header (car row)] )
+  (let ( [text-val (vector-ref row 1)]
+         [bytes-val (vector-ref row 2)]
+         [header  (vector-ref row 0)] )
     ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
     (if (non-empty-string? text-val)
         text-val
@@ -173,10 +180,10 @@
 ; Is this still true??
 (define (wicci-body-row-string row content-type)
   ; header-name text-value bytes-value
-  (let* ( [less1 (cdr row)]     [text-val (car less1)]
-          [less2 (cdr less1)]   [bytes-val (car less2)]
-          [header (car row)]
-          [log (λ (msg) (log-wicci-row row (format "~a: ~a" wicci-body-row-string msg)))] )
+  (let ( [text-val (vector-ref row 1)]
+         [bytes-val (vector-ref row 2)]
+         [header (vector-ref row 0)]
+         [log (λ (msg) (log-wicci-row row (format "~a: ~a" wicci-body-row-string msg)))] )
     ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
     (cond [(non-empty-string? text-val) text-val]
           [(not content-type) (log "No content-type!") ""]
@@ -190,7 +197,8 @@
 ; Return the value of a wicci response row as a byte-string
 (define (wicci-row-bytes row)
   ; header-name text-value bytes-value
-  (let* ( [less1 (cdr row)] [text-val (car less1)] [less2 (cdr less1)] [bytes-val (car less2)] )
+  (let ( [text-val (vector-ref row 1)]
+         [bytes-val (vector-ref row 2)] )
     ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
     (if (non-empty-string? text-val) (string->bytes/utf-8 text-val) bytes-val) ) )
 
@@ -202,29 +210,29 @@
 
 ; Return the regular header rows from the Wicci as a list of header structures
 (define (wicci-rows-headers rows)
-  (let ([hdr-rows (filter (λ (row) (not (string-prefix? (car row) "_"))) rows)])
-    (map (λ (row) (make-header (string->bytes/utf-8 (car row)) (wicci-row-bytes row))) hdr-rows) ) )
+  (let ([hdr-rows (filter (λ (row) (not (string-prefix? (vector-ref row 0) "_"))) rows)])
+    (map (λ (row) (make-header (string->bytes/utf-8 (vector-ref row 0)) (wicci-row-bytes row))) hdr-rows) ) )
 
 ; Return Wicci header rows by their header name
 ; Can we count on header name case being normalized??
 ; To lower-cabob-case or to Camel-Kabob-Case??
 ; We are assuming the Wicci trims its row fields!!
 (define (wicci-header-rows header rows)
-  (findf (λ (row) (string-ci=? header (car row))) rows) )
+  (filter (λ (row) (string-ci=? header (vector-ref row 0))) rows) )
 
 ; Return the first Wicci header row by its header name;
 ; logs any duplicates!
-(define (wicci-header-row header rows)
-  (let ([rows (wicci-header-rows header rows)])
-    (and (pair? rows)
-         (begin
-           (when (pair? (cdr rows))
-             (log-wicci-rows rows "wicci-header-row unexpected duplicate(s)!") )
-           (car rows) ) ) ) )
+(define (wicci-header-row header all-rows)
+  (let ([rows (wicci-header-rows header all-rows)])
+    (begin
+      (and (pair? rows)
+             (when (pair? (cdr rows))
+               (log-wicci-rows rows "wicci-header-row unexpected duplicate(s)!") )
+             (car rows) ) ) ) )
 
 ; Return the list of Wicci body rows
-(define (wicci-body-rows header rows)
-  (filter (λ (row) (string-prefix? (car row) "_body")) rows) )
+(define (wicci-body-rows rows)
+  (filter (λ (row) (string-prefix? (vector-ref row 0) "_body")) rows) )
 
 ; Translate a wicci body row to bytes suitable for respond/full
 (define (wicci-body-row-bytes row)
@@ -235,8 +243,30 @@
 ; Fetch any wicci body rows, if any, in the appropriate form
 (define (wicci-body rows)
   (map wicci-body-row-bytes (wicci-body-rows rows)) )
+; Return a list of elements taken from items where they exist
+; and are not #f or the corresponding items in defaults.
+(define (list-or-defaults items defaults)
+  (if (null? items)
+      defaults
+      (if (null? defaults)
+          items
+          (cons (or (car items) (car defaults))
+                (list-or-defaults (cdr items) (cdr defaults)) ) ) ) )
 
-;; ** Wicci Responder
+; _status | HTTP/1.1 200 OK
+; Return a list of the three parts or #f for any which don't exist.
+; We don't check what they look like!
+(define (wicci-status-row-parts rows)
+  (let ( [defaults '(#f #f #f)]
+         [row (wicci-header-row "_status" rows)] )
+    (if (not row)
+        defaults
+        (let ( [wicci-status (wicci-row-string row)] )
+          (if (not (non-empty-string? wicci-status))
+              defaults
+              (list-or-defaults (string-split wicci-status) defaults) ) ) ) ) )
+
+;; *** Wicci Xexpr Client Feedback Support
 
 ; get rid of any extra levels of nesting
 (define (xexpr-trim sexp)
@@ -265,33 +295,15 @@
               '() (request-headers/raw req) )
            ,@(if (not post-data) '() `((dt "Body:") (dd ,(bytes->string/utf-8 post-data)))) ) ) ) )
 
-; Return a list of elements taken from items where they exist
-; and are not #f or the corresponding items in defaults.
-(define (list-or-defaults items defaults)
-  (if (null? items)
-      defaults
-      (if (null? defaults)
-          items
-          (cons (or (car items) (car defaults))
-                (list-or-defaults (cdr items) (cdr defaults)) ) ) ) )
-
-; _status | HTTP/1.1 200 OK
-; Return a list of the three parts or #f for any which don't exist.
-; We don't check what they look like!
-(define (wicci-status-row-parts row)
-  (let ( [defaults '(#f #f #f)] )
-  (if (not row)
-      defaults
-      (let ( [wicci-status (wicci-row-string row)] )
-        (if (not (non-empty-string? wicci-status))
-            defaults
-            (list-or-defaults (string-split wicci-status) defaults) ) ) ) ) )
-
 (define (wicci-header-rows->xexpr rows)
-  (let ([hdr-rows (filter (λ (row) (not (string-prefix? (car row) "_body"))) rows)])
+  (let ( [hdr-rows
+          (filter (λ (row) (not (string-prefix? (vector-ref row 0) "_body"))) rows) ])
     `(table ,@(foldr
                (λ (row)
-                 `(tr (td ,(first row)) (td ,(second row)) (td ,(third row))) )
+                 `(tr
+                   (td ,(vector-ref row 0))
+                   (td ,(vector-ref row 1))
+                   (td ,(vector-ref row 2)) ) )
                hdr-rows ) ) ) )
 
 ; Convert any body rows into xexpr-encoded html.
@@ -304,10 +316,10 @@
         (cond [(not (non-empty-string? content-type)) "No Content-Type!"]
               [(not (string-prefix? content-type "text/html")) "Not text/html!" ]
               [else
-               (let ([hdr-rows (filter (λ (row) (string-prefix? (car row) "_body")) rows)])
+               (let ([hdr-rows (filter (λ (row) (string-prefix? (vector-ref row 0) "_body")) rows)])
                  `(dl ,@(foldr
                          (λ (row accum)
-                           (cons `(dt ,(first row))
+                           (cons `(dt ,(vector-ref row 0))
                                  (cons `(dd ,(wicci-body-row-string row content-type)) accum) ) )
                          '() hdr-rows ) ) ) ] ) ) ) )
 
@@ -316,7 +328,7 @@
      ,@(wicci-header-rows->xexpr rows)
      ,@(wicci-body-rows->xexpr rows content-type-row) ) )
 
-;; ** Error Reporting
+;; *** Wicci Error Reporting
 
 ; When the Wicci can't process a request, it should have internally
 ; logged the problem and returned us an error page to send to the
@@ -338,22 +350,27 @@
 ; Log a bad request which failed 
 (define (log-web-request req)
   ; How well will this work if some of it is binary?
-  (displayln "Something went wrong with this request:")
-  (pretty-print req #:newline #t)
+  (displayln "Problematic request:")
+  (pretty-print req)
 )
 
 (define (log-wicci-rows rows [message #f])
   ; These are only the problematic rows.
   ; We need to provide context.
   (displayln (or message "Something went wrong with these rows:"))
-  (pretty-print rows #:newline #t)
+  (pretty-print rows)
 )
 
 (define (log-wicci-row row [message #f])
   ; We need to provide context.
   (displayln (or message "Something went wrong with this row:"))
-  (pretty-print row #:newline #t)
+  (pretty-print row)
 )
+
+; Return proper xexpr list with given tag applied to given content
+; which may or may not already be a list.
+(define (xexpr-cons tag content)
+  ( (if (pair? content) cons list) tag content ) )
 
 ; Create content for an error page to be sent to the user.
 ; Use the Racket xexpr format for the html code
@@ -372,55 +389,92 @@
           ; unwrap body if it's a singleton list of a list
           [body (if (and (null? (cdr body)) (pair? (car body))) (car body) body)]
           ; prepend an h1 to the list of body items if we've got one
-          [body (if title/h1 (cons (cons 'h1 title/h1) body) body)] )
+          [body (if title/h1 (cons (xexpr-cons 'h1 title/h1) body) body)] )
     ; return the list of byte-strings required by respond/full for html content
     (list (string->bytes/utf-8 (xexpr->string `(html ,head (body ,@body))))) ) )
 
-;; ** Wicci Responder and Program Start
+;; *** Wicci Responder and Program Start
 
 ; Process a Web Request by sending it to the Wicci and
 ; converting the resulting rows into a response/full.
-; If anything goes wrong, send the user an appropriate
+; If anything goes wrong, and for some bizarre reason the
+; Wicci doesn't handle it, send the user an appropriate
 ; response page and also log the error.
 (define (wicci-responder req)
-  (let* ( [method (bytes->string/utf-8 (request-method req))]
-         [uri (url->string (request-uri req))]
-         [request-headers (headers->bytes method uri (request-headers/raw req))]
-         [request-body (request-post-data/raw req)] )
-    (if (not (and method uri request-headers request-body)) ; we need these things!
-        (log-web-request req) ; somethings terribly wrong with this request!
+  (define missings '())
+  (define xexpr-missings '())
+  (define (try name item)
+    (when (not item)
+      (set! missings (cons name missings)) ; push name on missings
+      (set! xexpr-missings                 ; push xexpr details on expr-missings
+            (cons '(li name) xexpr-missings) ) )
+    item )                              ; return the item in any case
+  (let* ( [method-bytes (try "method" (request-method req))]
+          [uri (try "url" (url->string (request-uri req)))]
+          [request-headers
+           (try "headers" (headers->bytes method-bytes uri (request-headers/raw req))) ]
+          [request-body (or (request-post-data/raw req) #"")] ) ; OK if none at this point
+    (if (not (null? missings)) ; something essential's missing
+        (begin
+          (printf "wicci-responder failed to get: ~a~n" missings)
+          (log-web-request req)
+          (response/full
+           500 #"Request Error"
+           (current-seconds) TEXT/HTML-MIME-TYPE
+           '()
+           (xexpr->content #:title/h1 "We didn't fully get your request"
+                           '(p "Required elements we failed to get:")
+                           `(ul ,xexpr-missings) ) ) )
+        ; Should we check that Content-Length is compatible with the body??
+        ; Maybe the Racket Web Server checks that already??
+        ; OK, we got what we need from the request, send it to the database:
         (let ( [rows (query-rows (db) (db-stmt) request-headers request-body)] )
-          (if (not rows) ; the wicci query failed!
+          (if (or (not rows) (null? rows))
               (begin
+                (displayln "wicci-responder: database query failed!")
                 (log-web-request req)
                 (response/full
-                 500 "Database Error"
+                 500 #"Database Error1"
                  (current-seconds) TEXT/HTML-MIME-TYPE
                  '()
                  (xexpr->content #:title/h1 "The Wicci Failed to Process Your Request"
                                  (request->xexpr req) ) ) )
               ; We got a response from the Wicci Database, let's check it
               (let* ( [response-status-parts (wicci-status-row-parts rows)]
-                     [status-code (string->integer (second response-status-parts))]
-                     [status-msg (third response-status-parts)]
-                     [response-headers (wicci-rows-headers rows)]
-                     [content-type-row (wicci-header-row "content-type" rows)]
-                     )
-                (if (not (and status-code status-msg response-headers)) ; we need these things!
-                    (response/full
-                     500 "Database Error"
-                     (current-seconds) TEXT/HTML-MIME-TYPE
-                     '()
-                     (xexpr->content #:title/h1 "Wicci Database Error"
-                                     (xexpr-join
-                                      (request->xexpr req)
-                                      (wicci-response->xexpr rows content-type-row) ) ) )
+                      [status-code (string->integer (second response-status-parts))]
+                      [status-msg (third response-status-parts)]
+                      [response-headers (wicci-rows-headers rows)]
+                      [content-type-row (wicci-header-row "content-type" rows)] )
+                (if (not (and status-code status-msg response-headers)) ; we need these!
+                    (begin
+                      (try "status-code" status-code)
+                      (try "status-message" status-msg)
+                      (try "response-headers" response-headers)
+                      (printf "wicci-responser: failed to get ~a~n" missings)
+                      (log-web-request req)
+                      (log-wicci-rows rows "What the Wicci gave us:")
+                      (response/full
+                       500 #"Database Error2"
+                       (current-seconds) TEXT/HTML-MIME-TYPE
+                       '()
+                       (xexpr->content #:title/h1 "Wicci Database Error"
+                                       (xexpr-join
+                                        (request->xexpr req)
+                                        '(p "The database failed to give us back:")
+                                        `(ul ,xexpr-missings) ) ) ) )
                     ; OK, everything looks fine, let's send our response
-                    (response/full
-                     status-code status-msg
-                     (current-seconds) TEXT/HTML-MIME-TYPE
-                     response-headers
-                     (wicci-body rows) ) ) ) ) ) ) ) )
+                    (begin
+                      (when (debug-mode)
+                        (printf "About to call response/full with:~n")
+                        (debug: status-code status-msg
+                                (current-seconds) TEXT/HTML-MIME-TYPE
+                                response-headers
+                                (wicci-body rows) ) )
+                        (response/full
+                         status-code (string->bytes/latin-1 status-msg)
+                         (current-seconds) TEXT/HTML-MIME-TYPE
+                         response-headers
+                         (wicci-body rows) ) ) ) ) ) ) ) ) )
 
 ; Start a web service using the given responder
 (define (httpd responder)
@@ -458,7 +512,7 @@
 ; Echo the user's request back to them as html.
 ; Use response/full, xexpr and quasiquotation explicitly.
 (define (echo-responder req)
-  (let ( [title/h1 `("Your Request echoed back as a Web Page")] )
+  (let ( [title/h1 "Your Request echoed back from the Shim"] )
     (response/full
      200 #"OK"
      (current-seconds) TEXT/HTML-MIME-TYPE
@@ -469,9 +523,9 @@
        (xexpr->string
         `(html
           (head
-           ,(cons 'title title/h1)
+           ,(xexpr-cons 'title title/h1)
            (body
-            ,(cons 'h1 title/h1)
+            ,(xexpr-cons 'h1 title/h1)
             ,@(request->xexpr req)
             (p "The Wicci will be ready for you " (em "Real Soon Now®!")) ) ) ) ) ) ) ) ) )
 
@@ -587,7 +641,8 @@
 (define tests
   (list
    (cons 'echo-server (λ () (httpd echo-responder)))
-   (cons 'greg-db (λ () (test-in-greg test-db-query))) ) )
+   (cons 'greg-db (λ () (test-in-greg test-db-query)))
+   (cons 'greg-wicci (λ () (test-in-greg (λ () (httpd wicci-responder)) ))) ) )
 
 (define (run name)
   (let ( [pair (assoc name tests)] )
