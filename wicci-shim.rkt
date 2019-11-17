@@ -5,7 +5,7 @@
 ;; Consider converting this to Typed Racket!!
 ;; Yay, in Racket, λ is the same as lambda!
 
-;;; * External Modules
+;; * External Modules
 
 (require db) ; to talk with PostgreSQL
 (require xml) ; for xexpr->string
@@ -23,39 +23,38 @@
 (require web-server/servlet)
 (require web-server/servlet-env)
 
-;;; * Macros
+;; * Macros
 
 ;; Notice our lexical convention of ending macro names with a colon:
 
-;; Make creating parameters visually simpler
+; Make creating parameters visually simpler
 (define-syntax-rule (param: parameter-name initial-value)
   (define parameter-name (make-parameter initial-value)) )
 
-;; Example: a debug-mode parameter initially off
+; Example: a debug-mode parameter initially off
 (param: debug-mode #f)
 
-;; Ease printing values when debug-mode is on.
-;; How can we include filename and line number??
+; Ease printing values when debug-mode is on.
+; How can we include filename and line number??
 (define-syntax-rule (debug: exp ...)
   (when (debug-mode)
     (printf "~a -> ~s~n" 'exp exp) ... ) )
 
-;;; * Parameters for our Program Options
+;; * Parameters for our Program Options
 
-;; Let's use "parameters" (functions simulating dynamic (not
-;; lexical) bindings, for program options.  Changes to
-;; parameters are also thread-local, so different threads can
-;; use different options.  Parameter changes can be localized
-;; with "parameterize" which is convenient for testing and
-;; development at the repl without having to restart
-;; anything.
+; Let's use "parameters" (functions simulating dynamic (not
+; lexical) bindings, for program options.  Changes to
+; parameters are thread-local, different threads can use
+; different options.  Parameter changes can be localized
+; with "parameterize" which is convenient for testing and
+; development at the repl without having to restart anything.
 
-;; Parameters are currently a bit clumsy.  Maybe we could
-;; help extending the unstable parameter groups module:
-;; https://docs.racket-lang.org/unstable/Parameter_Groups.html?q=parameter%20groups
+; Parameters are currently a bit clumsy.  Maybe we could
+; help extending the unstable parameter groups module:
+; https://docs.racket-lang.org/unstable/Parameter_Groups.html?q=parameter%20groups
 
-;; Here are all of our program parameters for program options:
-;; (param: debug-mode #f) ; definition moved into Macros section above!
+; Here are all of our program parameters for program options:
+; (param: debug-mode #f) ; definition moved into Macros section above!
 (param: echo-mode #f)
 (param: repl-mode #f)
 (param: test-name "")
@@ -68,23 +67,29 @@
 (param: db-func-cmd (format (db-func-format) (db-func)))
 (param: db-user (getenv "USER"))
 (param: db-name "wicci1")
-;; these are initialized by open-db below
+; these are initialized by open-db below
 (param: db #f)
 (param: db-pool #f)
 (param: db-stmt #f)
 
-;; Show parameter values when in debug mode.
-;; How might we only show non-default parameters??
+; Show parameter values when in debug mode.
+; How might we only show non-default parameters??
 (define (show-parameters)
   (debug: (debug-mode) (echo-mode) (repl-mode)
-          (test-name)   (http-port)   (db-init-func)
-          (db-init-func-format)   (db-init-func-cmd)   (db-func)
-          (db-func-format)   (db-func-cmd)   (db-user)
-          (db-name) ) )
+          (test-name)   (http-port)
+          (db-init-func) (db-init-func-format) (db-init-func-cmd)
+          (db-func) (db-func-format) (db-func-cmd)
+          (db-user) (db-name) ) )
 
-;;; * Running Shim as a Program
+;; * Running Shim as a Program
 
-;; Options can be set from the "Command Line", overriding most parameters
+; Since the command-line is so tightly connected with
+; parameters, it would be great if option parameters were in
+; a parameter-group and had property list values for use as
+; options.  Then command-line would take little more than a
+; parameter-group name!
+
+; Options can be set from the "Command Line", overriding most parameters
 (command-line
  #:once-each
  [("-d" "--debug") "display what's going on" (debug-mode #t)]
@@ -97,16 +102,16 @@
  [("-U" "--db-user") u "database user account" (db-user u)]
  [("-N" "--db-name") d "database name" (db-name d)] )
 
-;; Return true iff we are in the development repl vs. running as a program.
-;; This is a heuristic.  Racket development environments generally are running
-;; a program whose name ends in "racket". Is there a better way??
+; Return true iff we are in the development repl vs. running as a program.
+; This is a heuristic.  Racket development environments generally are running
+; a program whose name ends in "racket". Is there a better way??
 (define (in-devel-repl)
   (regexp-match-positions #rx"racket$" (path->string (find-system-path 'run-file))) )
 
-;;; * Database
+;; * Database
 
-;; Check with db to ensure db functions exist with required interfaces.
-;; Let's implement this!!
+; Check with db to ensure db functions exist with required interfaces.
+; Let's implement this!!
 (define (check-db-funcs)
   ; wicci-init-func :: () -> text
   ; wicci-query-func :: (bytea, bytea) -> TABLE(_name text, _text text, _binary bytea)
@@ -114,7 +119,7 @@
   ; $2 :: bytea :: empty or as Content-Type, Content-Length :: body sent by browser
   #t )
 
-;; Set up our database connections and a prepared statement in parameters:
+; Set up our database connections and a prepared statement in parameters:
 ;; (db-pool): the global connection pool, not for direct use
 ;; (db): a thread-specific database connection
 ;; (db-stmt): a prepared statement, automagically prepared in current db
@@ -132,16 +137,16 @@
                 ((postgresql) (db-func-cmd))
                 (else error "unknown database system") ) ) )) )
 
-;;; * Wicci Web Interface
+;; * Wicci Web Interface
 
-;;; ** Preparing Client Data for Wicci
+;; ** Preparing Client Data for Wicci
 
-;; Recreate the hunk of bytes the client sent which got
-;; parsed apart by the Racket Web Server.  Octets other than
-;; US-ASCII have no official interpretation.  There is a mime
-;; encoding and a JSON encoding which fit within a US-ASCII
-;; character set which we'll leave for the Wicci to decode as
-;; it sees fit
+; Recreate the hunk of bytes the client sent which got
+; parsed apart by the Racket Web Server.  Octets other than
+; US-ASCII have no official interpretation.  There is a mime
+; encoding and a JSON encoding which fit within a US-ASCII
+; character set which we'll leave for the Wicci to decode as
+; it sees fit
 (define (headers->bytes method-bytes uri headers-list)
   (let ([out (open-output-bytes)])
     (write-bytes method-bytes out)
@@ -155,85 +160,84 @@
       (write-bytes #"\r\n" out) )
     (get-output-bytes out) ) )
 
-;;; ** Wicci Responder
+;; ** Wicci Responder
 
-;;; *** Wicci Response Row Support
+;; *** Wicci Response Row Support
 
-;; The Wicci returns its response as a list of (database)
-;; rows received as Racket vectors.  Currently all rows look
-;; like:
-;; [ 0: header-name (text) [ 1: text-value | 2: binary-value
-;; header-names only contain US-ASCII characters
+; The Wicci returns its response as a list of (database)
+; rows as Racket vectors.  Rows have the format:
+;; 0: text-header-name | 1: text-value | 2: binary-value
+; header-names only contain US-ASCII characters
 
-;; Return the three row fields as values suitable for let-values
+; Return the three row fields as values suitable for let-values
 (define (row->fields row)
-;; assert: (= 3 (vector-length row))
+; assert: (= 3 (vector-length row))
   (vector->values row) )
 
-;; Return the three row fields as a mapped-over list
+; Return the three row fields as a mapped-over list
 (define (row-map f row)
-;; assert: (= 3 (vector-length row))
+; assert: (= 3 (vector-length row))
   (map f (vector->list row)) )
 
-;; Return the row's header field
+; Return the row's header field
 (define (row->header row)
   (vector-ref row 0) )
 
-;; We need to select a subset of rows associated with particular headers
+; We need to select a subset of rows associated with particular headers
 
-;; Return Wicci header rows by their header name
-;; Can we count on header name case being normalized??
-;; To lower-cabob-case or to Camel-Kabob-Case??
-;; We are assuming the Wicci trims its row fields!!
-(define (rows-with-header header rows)
-  (filter (λ (row) (string-ci=? header (row->header row))) rows) )
+; Return Wicci header rows by their header name
+; Can we count on header name case being normalized??
+; To lower-cabob-case or to Camel-Kabob-Case??
+; We are assuming the Wicci trims its row fields!!
+(define (rows-with-header header all-rows)
+  (filter (λ (row) (string-ci=? header (row->header row))) all-rows) )
 
-;; a singleton is a list with only one element
+; a singleton is a list with only one element
 (define (singleton? x)
   (and (pair? x) (null? (cdr x))) )
 
-;; Return the first Wicci header row by its header name or #f
-;; logs duplicates!
+; Return the first Wicci header row by its header name or #f
+; logs duplicates!
 (define (row-with-header header all-rows)
   (let ([rows (rows-with-header header all-rows)])
     (when (not (singleton? rows))
       (log-wicci-rows rows "row-with-header unexpected duplicate(s)!") )
-    (and (pair? rows) (car rows)) ) )
+    (and (pair? rows) (first rows)) ) )
 
-;; Row headers sort rows into a few categories
+; Row headers sort rows into a few categories
 
 (define (body-header? header)
   (string-prefix? "_body" header) )
 
-;; Rows which contain body content
+; Rows which contain body content
 (define (body-row? row)
   (body-header? (row->header row)) )
 
-;; Rows which don't contain body content
+; Rows which don't contain body content
 (define (non-body-row? row)
   (not (body-row? row)) )
 
-;; Rows which are not Response Headers
+; Rows which are not Response Headers
 (define (special-row? row)
   (string-prefix? (row->header row) "_") )
 
-;; Rows which are Response Headers
+; Rows which are Response Headers
 (define (header-row? row)
   (not (special-row? row)) )
 
-;; Returns s as an exact integer or #f.
-;; Parsing a general number seems expensive!!
+; Returns s as an exact integer or #f.
+; Parsing a general number seems expensive!!
 (define (string->integer s)
   (let ( [n (string->number s 10 'number-or-false)] )
     (and (integer? n) (inexact->exact n)) ) )
 
-;; Return the value of a non-body row as a string value.
-;; The Wicci should be giving us US-ASCII for header values
-;; which if provided as a byte-string will satisfy a latin-1
-;; encoding.  It's an error to call this on a body row!!
+; Return the value of a non-body row as a string value.
+; The Wicci should be giving us US-ASCII for header values
+; which if provided as a byte-string will satisfy a latin-1
+; encoding.  It's an error to call this on a body row!!
 (define (wicci-row-string row)
   (let-values ([(header text-val bytes-val) (row->fields row)] )
-    ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
+    ; assert: (or (non-empty-string? text-val) (< 0 (bytes-length bytes-val)))
     (if (non-empty-string? text-val)
         text-val
         (if (body-header? header)
@@ -242,16 +246,16 @@
               "" )
             (bytes->string/latin-1 bytes-val) ) ) ) )
 
-;; Return the value of a body-row as a string if possible or
-;; log a failure and return "".
-;; Body byte-strings might be encoded any which way.
-;; Currently we only use this function for debugging and
-;; maybe error reports to console, so it should be moot.
-;; Is this still true??
+; Return the value of a body-row as a string if possible or
+; log a failure and return "".
+; Body byte-strings might be encoded any which way.
+; Currently we only use this function for debugging and
+; maybe error reports to console, so it should be moot.
+; Is this still true??
 (define (wicci-body-row-string row content-type)
   (let-values ([ (header text-val bytes-val) (row->fields row) ])
     (define (log msg) (log-wicci-row row (format "~a: ~a" wicci-body-row-string msg)))
-    ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
+    ; assert: (or (non-empty-string? text-val) (< 0 (bytes-length bytes-val)))
     (cond [(non-empty-string? text-val) text-val]
           [(not content-type) (log "No content-type!") ""]
           [(not (body-header? header)) (log "Not a body row!") ""]
@@ -261,38 +265,38 @@
            (bytes->string/utf-8 bytes-val) ]
           [else (log "can't convert this!") "" ] ) ) )
 
-;; Return the value of a wicci response row as a byte-string
+; Return the value of a wicci response row as a byte-string
 (define (wicci-row-bytes row)
   (let-values ([ (header text-val bytes-val) (row->fields row) ])
-    ; assert: (not (eq? (non-empty-string? text-val) (< 0 (bytes-length bytes-val))))
+    ; assert: (or (non-empty-string? text-val) (< 0 (bytes-length bytes-val)))
     (if (non-empty-string? text-val) (string->bytes/utf-8 text-val) bytes-val) ) )
 
-;; Return the value of a wicci response row as an integer or #f.
-;; Expensive?? Possibly generating a temporary string!!
-;; Not currently used!!
+; Return the value of a wicci response row as an integer or #f.
+; Expensive?? Possibly generating a temporary string!!
+; Not currently used!!
 (define (wicci-row-integer row)
   (string->integer (wicci-row-string row)) )
 
-;; Return the regular header rows from the Wicci as a list of header structures
+; Return the regular header rows from the Wicci as a list of header structures
 (define (wicci-rows-headers rows)
   (let ([hdr-rows (filter header-row? rows)])
     (map (λ (row) (make-header (string->bytes/utf-8 (row->header row)) (wicci-row-bytes row))) hdr-rows) ) )
 
-;; Return the list of Wicci body rows
+; Return the list of Wicci body rows
 (define (wicci-body-rows rows)
   (filter body-row? rows) )
 
-;; Translate a wicci body row to bytes suitable for respond/full
+; Translate a wicci body row to bytes suitable for respond/full
 (define (wicci-body-row-bytes row)
   ; should we check Content-Type or Content-Length??
   ; code for fetching large object body needs to be added here!!
   (wicci-row-bytes row) )
 
-;; Fetch any wicci body rows, if any, in the appropriate form
+; Fetch any wicci body rows, if any, in the appropriate form
 (define (wicci-body rows)
   (map wicci-body-row-bytes (wicci-body-rows rows)) )
-;; Return a list of elements taken from items where they exist
-;; and are not #f or the corresponding items in defaults.
+; Return a list of elements taken from items where they exist
+; and are not #f or the corresponding items in defaults.
 (define (list-or-defaults items defaults)
   (if (null? items)
       defaults
@@ -301,9 +305,9 @@
           (cons (or (car items) (car defaults))
                 (list-or-defaults (cdr items) (cdr defaults)) ) ) ) )
 
-;; _status | HTTP/1.1 200 OK
-;; Return a list of the three parts or #f for any which don't exist.
-;; We don't check what they look like!
+; _status | HTTP/1.1 200 OK
+; Return a list of the three parts or #f for any which don't exist.
+; We don't check what they look like!
 (define (wicci-status-row-parts rows)
   (let ( [defaults '(#f #f #f)]
          [row (row-with-header "_status" rows)] )
@@ -314,21 +318,21 @@
               defaults
               (list-or-defaults (string-split wicci-status) defaults) ) ) ) ) )
 
-;;; *** Wicci Xexpr Client Feedback Support
+;; *** Wicci Xexpr Client Feedback Support
 
-;; xexpr is Racket's convention for using symbolic-expressions to represent xml/html.
-;; We use xexpr to prepare error and test pages to send to the client.
+; xexpr is Racket's convention for using symbolic-expressions to represent xml/html.
+; We use xexpr to prepare error and test pages to send to the client.
 
-;; get rid of any extra levels of nesting
+; get rid of any extra levels of nesting
 (define (xexpr-trim sexp)
   (if (and (singleton? sexp) (not (symbol? (car sexp)))) (xexpr-trim (car sexp)) sexp) )
 
-;; Join trimmed xexpr forms together with a suitable parent tag
+; Join trimmed xexpr forms together with a suitable parent tag
 (define (xexpr-join #:tag [tag 'div] . xexprs)
   (let ([xexprs (map xexpr-trim xexprs)])
     (cons tag xexprs) ) )
 
-;; Convert client's request into xexpr html
+; Convert client's request into xexpr html
 (define (request->xexpr req)
   (let* ([method (bytes->string/utf-8 (request-method req))]
          [uri (url->string (request-uri req))]
@@ -343,7 +347,7 @@
               '() (request-headers/raw req) )
            ,@(if (not post-data) '() `((dt "Body:") (dd ,(bytes->string/utf-8 post-data)))) ) ) ) )
 
-;; Convert the Wicci's non-body rows into xexpr html
+; Convert the Wicci's non-body rows into xexpr html
 (define (wicci-header-rows->xexpr rows)
   (let ( [hdr-rows (filter non-body-row? rows)] )
     `(table ,@(foldr
@@ -352,9 +356,9 @@
                    ,(row-map (λ (field) `(td ,field)) row) ) )
                hdr-rows ) ) ) )
 
-;; Convert any body rows into xexpr-encoded html.
-;; Only intended for debugging of simple responses in a case
-;; where the Content-Type is text/html!
+; Convert any body rows into xexpr-encoded html.
+; Only intended for debugging of simple responses in a case
+; where the Content-Type is text/html!
 (define (wicci-body-rows->xexpr rows content-type-row)
   (if (not content-type-row)
       "No Content-Type Row!"
@@ -374,16 +378,16 @@
      ,@(wicci-header-rows->xexpr rows)
      ,@(wicci-body-rows->xexpr rows content-type-row) ) )
 
-;; Return proper xexpr list with given tag applied to given content
-;; which may or may not already be a list.
+; Return proper xexpr list with given tag applied to given content
+; which may or may not already be a list.
 (define (xexpr-cons tag content)
   ( (if (pair? content) cons list) tag content ) )
 
-;; Create content for an error page to be sent to the user.
-;; Use the Racket xexpr format for the html code
-;; Allow for optional title, h1 and head contents.
-;; Collect multiple body parts and assemble it all together.
-;; Return the list of byte-string format 
+; Create content for an error page to be sent to the user.
+; Use the Racket xexpr format for the html code
+; Allow for optional title, h1 and head contents.
+; Collect multiple body parts and assemble it all together.
+; Return the list of byte-string format 
 (define (xexpr->content #:title/h1 [title/h1 #f] #:head [head '()] . body)
   (let* ( ; make sure title/h1 is a list, if it exists
           [title/h1 (if (or (not title/h1) (pair? title/h1)) title/h1 (list title/h1))]
@@ -400,32 +404,32 @@
     ; return the list of byte-strings required by respond/full for html content
     (list (string->bytes/utf-8 (xexpr->string `(html ,head (body ,@body))))) ) )
 
-;;; *** Wicci Error Reporting
+;; *** Wicci Error Reporting
 
-;; When the Wicci can't process a request, it should have internally
-;; logged the problem and returned us an error page to send to the
-;; client.
+; When the Wicci can't process a request, it should have internally
+; logged the problem and returned us an error page to send to the
+; client.
 
-;; We need the Wicci to return a request-id for reference just in case
-;; things go south in an unexpected manner.  This will require some
-;; refactoring!!
+; We need the Wicci to return a request-id for reference just in case
+; things go south in an unexpected manner.  This will require some
+; refactoring!!
 
-;; In the rare cases where the Wicci itself or the Racket Web Server
-;; response system seems to have failed, we should
-;; (1) Write an error message to the "console" (redirected to a log
-;;     file when the Shim is run as a command)
-;; (2) Write an error report to the database, if possible
-;; (3) Include the request-id with both, if available
+; In the rare cases where the Wicci itself or the Racket Web Server
+; response system seems to have failed, we should
+; (1) Write an error message to the "console" (redirected to a log
+;     file when the Shim is run as a command)
+; (2) Write an error report to the database, if possible
+; (3) Include the request-id with both, if available
 
-;; In various places we need to enforce contracts on function arguments.
-;; We're currently putting in a comment like:
-;; assert: what-should-be-true
-;; We could use raise-argument-error or create a/some nice assert macros(s)
-;; Probably better to convert to typed-racket!
+; In various places we need to enforce contracts on function arguments.
+; We're currently putting in a comment like:
+; assert: what-should-be-true
+; We could use raise-argument-error or create a/some nice assert macros(s)
+; Probably better to convert to typed-racket!
 
 (require racket/pretty)
 
-;; Log a bad request which failed 
+; Log a bad request which failed 
 (define (log-web-request req)
   ; How well will this work if some of it is binary?
   (displayln "Problematic request:")
@@ -445,13 +449,13 @@
   (pretty-print row)
 )
 
-;;; *** Wicci Responder and Program Start
+;; *** Wicci Responder and Program Start
 
-;; Process a Web Request by sending it to the Wicci and
-;; converting the resulting rows into a response/full.
-;; If anything goes wrong, and for some bizarre reason the
-;; Wicci doesn't handle it, send the user an appropriate
-;; response page and also log the error.
+; Process a Web Request by sending it to the Wicci and
+; converting the resulting rows into a response/full.
+; If anything goes wrong, and for some bizarre reason the
+; Wicci doesn't handle it, send the user an appropriate
+; response page and also log the error.
 (define (wicci-responder req)
   (define missings '())
   (define xexpr-missings '())
@@ -528,42 +532,42 @@
                          response-headers
                          (wicci-body rows) ) ) ) ) ) ) ) ) )
 
-;; Start a web service using the given responder
+; Start a web service using the given responder
 (define (httpd responder)
   (serve/servlet responder #:command-line? #t #:servlet-regexp #rx"") )
 
-;; If not running interactively and no other requests,
-;; ==> Start The Wicci!
+; If not running interactively and no other requests,
+; ==> Start The Wicci!
 (when (not (or (echo-mode) (repl-mode) (test-name) (in-devel-repl)))
   (open-db)
   (httpd wicci-responder) )
 
-;;; * Testing & Parameter Management - Ignore for Normal Operation
+;; * Testing & Parameter Management - Ignore for Normal Operation
 
-;;; ** Web Interface Tests
+;; ** Web Interface Tests
 
-;; Just say hello!
+; Just say hello!
 (define (hello-responder req)
   (response/xexpr
    '(html (head (title "Hello world!"))
           (body (p "Hey out there!")) ) ) )
 
-;; Anomaly!!:
-;; When we explicitly specify the header
-;; Content-Type: text-html; charset=utf-8
-;; we get Â® instead of just a ® on the last line
-;; and Content-Length: 785
-;; When we DON'T explicitly specify the Content-Type header
-;; we still get that header, we don't get the character anomaly
-;; and Content-Length: 721
-;; My Guess: We're causing the Racket Web Server to think that
-;; the body is NOT is utf-8 and to convert it "again"
-;; Experiment: Convert to latin-1 and provide the header
-;; Result: we get the header, we don't get the character anomaly
-;; and Content-Length: 784
+; Anomaly!!:
+; When we explicitly specify the header
+; Content-Type: text-html; charset=utf-8
+; we get Â® instead of just a ® on the last line
+; and Content-Length: 785
+; When we DON'T explicitly specify the Content-Type header
+; we still get that header, we don't get the character anomaly
+; and Content-Length: 721
+; My Guess: We're causing the Racket Web Server to think that
+; the body is NOT is utf-8 and to convert it "again"
+; Experiment: Convert to latin-1 and provide the header
+; Result: we get the header, we don't get the character anomaly
+; and Content-Length: 784
 
-;; Echo the user's request back to them as html.
-;; Use response/full, xexpr and quasiquotation explicitly.
+; Echo the user's request back to them as html.
+; Use response/full, xexpr and quasiquotation explicitly.
 (define (echo-responder req)
   (let ( [title/h1 "Your Request echoed back from the Shim"] )
     (response/full
@@ -582,17 +586,17 @@
             ,@(request->xexpr req)
             (p "The Wicci will be ready for you " (em "Real Soon Now®!")) ) ) ) ) ) ) ) ) )
 
-;; If not running interactively and echo-mode is requested
-;; ==> Start Echoing Requests!
+; If not running interactively and echo-mode is requested
+; ==> Start Echoing Requests!
 (when (and (echo-mode) (not (in-devel-repl)))
   (httpd echo-responder) )
 
-;;; ** Parameter Management
+;; ** Parameter Management
 
-;; run-wicci is a bit exotic.  It can be used to
-;; - run tests which override parameters for the duration of the call
-;; - run alternative shim variations simultaneously
-;; Sincere apologies for mind-numbing repetitious coding pattern -jgd!!
+; run-wicci is a bit exotic.  It can be used to
+; - run tests which override parameters for the duration of the call
+; - run alternative shim variations simultaneously
+; Sincere apologies for mind-numbing repetitious coding pattern -jgd!!
 (define (run-wicci
          [thunk #f] ; procedure to run, if present
          ; optional argument for each parameter defaults to its current value
@@ -631,10 +635,10 @@
     (if thunk (thunk)
         (read-eval-print-loop) ) ) )
 
-;;; ** Database Tests
+;; ** Database Tests
 
-;; A convenience constructor for test headers to be sent to the wicci as bytes,
-;; allowing them to be expressed as association lists.
+; A convenience constructor for test headers to be sent to the wicci as bytes,
+; allowing them to be expressed as association lists.
 (define (headers-alist->bytes alist)
   (let ([out (open-output-bytes)])
     (for ([pair alist])
@@ -649,7 +653,7 @@
 
 (define test-body-latin-1 (string->bytes/latin-1 test-body))
 
-;; use typed-racket to require this to be a proper list of pairs of http request headers!!
+; use typed-racket to require this to be a proper list of pairs of http request headers!!
 (define (make-test-headers #:body [body #f] #:content-type [content-type #f])
   (headers-alist->bytes
    `( (#"Accept" . #"text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8")
@@ -661,26 +665,26 @@
       ,@(if (not content-type) '()
             (list (cons #"Content-Type" content-type)) ) ) ) )
 
-;; create a data structure to hold compatible headers & body together!
+; create a data structure to hold compatible headers & body together!
 (define test-headers-utf-8
   (make-test-headers #:body test-body-latin-1 #:content-type #"text/plain; charset=utf-8") )
 
 (define (test-db-query)
   (query-rows (db) (db-stmt) test-headers-utf-8 test-body-utf-8) )
-;; '_body_bin' is coming back as a hex-encoded string "\\x..."
-;; '_body' is coming back with embedded \n where I wanted a newline!
+; '_body_bin' is coming back as a hex-encoded string "\\x..."
+; '_body' is coming back with embedded \n where I wanted a newline!
 
 ;'(#("_status" "HTTP/1.1 200 OK" #"")
-;;  #("Server" "Wicci" #"")
-;;  #("Content-Length" "410" #"")
-;;  #("Content-Type" "text/html; charset=utf-8" #"")
-;;  #("_body"
-;;    "\n<!DOCTYPE HTML>\n<html>\n<head>\n<title>\nWicci HTML Echo Test\n</title>\n</head>\n<body>\n    <dl>\n<dt>Accept</dt> <dd>text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8</dd>\n<dt>Host</dt> <dd>localhost</dd>\n<dt>Content-Length</dt> <dd>12</dd>\n<dt>Content-Type</dt> <dd>text/plain; charset=utf-8</dd>\n<dt></dt> <dd></dd>\n<dt> _body </dt>\n<dd>\nHello Wicci!\n</dd>\n    </dl>\n</body>\n</html>\n"
-;;    #""))
+;  #("Server" "Wicci" #"")
+;  #("Content-Length" "410" #"")
+;  #("Content-Type" "text/html; charset=utf-8" #"")
+;  #("_body"
+;    "\n<!DOCTYPE HTML>\n<html>\n<head>\n<title>\nWicci HTML Echo Test\n</title>\n</head>\n<body>\n    <dl>\n<dt>Accept</dt> <dd>text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8</dd>\n<dt>Host</dt> <dd>localhost</dd>\n<dt>Content-Length</dt> <dd>12</dd>\n<dt>Content-Type</dt> <dd>text/plain; charset=utf-8</dd>\n<dt></dt> <dd></dd>\n<dt> _body </dt>\n<dd>\nHello Wicci!\n</dd>\n    </dl>\n</body>\n</html>\n"
+;    #""))
 
-;;; ** Test Environments
+;; ** Test Environments
 
-;; create a test repl using postgres db "greg"
+; create a test repl using postgres db "greg"
 (define (test-in-greg [thunk #f])
   (run-wicci thunk
    #:debug-mode #t
@@ -703,13 +707,13 @@
         (printf "Test ~a not found~n" name)
         ((cdr pair)) ) ) )
 
-;; If not running interactively and we have a test
-;; ==> Run The Test!
+; If not running interactively and we have a test
+; ==> Run The Test!
 
 (when (and (test-name) (not (in-devel-repl)))
     (run (test-name)) )
 
-;; If not running interactively and repl-mode is requested
-;; ==> Start a REPL!
+; If not running interactively and repl-mode is requested
+; ==> Start a REPL!
 (when (and (repl-mode) (not (in-devel-repl)))
   (read-eval-print-loop) )
