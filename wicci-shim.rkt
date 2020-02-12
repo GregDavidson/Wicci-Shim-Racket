@@ -687,10 +687,21 @@
 ; create a test repl using postgres db "greg"
 (define (test-in-greg [thunk #f])
   (run-wicci thunk
+             #:debug-mode #t
+             #:repl-mode (not thunk)
+             #:http-port 8000
+             #:db-user "greg"
+             #:db-name ""
+             #:db-init-func-cmd "select 'New database connection initialized!'"
+             #:db-func-cmd "SELECT h,v,b FROM wicci_serve_echo($1,$2,'_body') AS _(h,v,b)" ) )
+
+; create a test repl using postgres db "Engineering"
+(define (test-in-Engineering [thunk #f])
+  (run-wicci thunk
    #:debug-mode #t
    #:repl-mode (not thunk)
    #:http-port 8000
-   #:db-user "greg"
+   #:db-user "Engineering"
    #:db-name ""
    #:db-init-func-cmd "select 'New database connection initialized!'"
    #:db-func-cmd "SELECT h,v,b FROM wicci_serve_echo($1,$2,'_body') AS _(h,v,b)" ) )
@@ -698,8 +709,11 @@
 (define tests
   (list
    (cons 'echo-server (λ () (httpd echo-responder)))
+   (cons 'Engineering-db (λ () (test-in-Engineering test-db-query)))
    (cons 'greg-db (λ () (test-in-greg test-db-query)))
-   (cons 'greg-wicci (λ () (test-in-greg (λ () (httpd wicci-responder)) ))) ) )
+   (cons 'greg-wicci (λ () (test-in-greg (λ () (httpd wicci-responder)) )))
+   (cons 'Engineering-wicci (λ () (test-in-Engineering (λ () (httpd wicci-responder)) )))
+   ) )
 
 (define (run name)
   (let ( [pair (assoc name tests)] )
