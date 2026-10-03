@@ -1,5 +1,10 @@
 * Wicci Shim
 
+** NOTICE OF GitHub FAILURE
+  - As of 2026-10-01 GitHub is failing to correctly display this document!
+  - See the section below titled: ** Availability Of This Document
+
+
 An HTTP reverse-proxy server which bridges between a
 client's browser and a PostgreSQL-based [[https://gregdavidson.github.io/wicci-core-S0_lib/][Wicci System]].  A key
 component of the NGender Web Framework.
@@ -19,3 +24,21 @@ has nearly all of the desired features with much less code
 and complexity.  It is a testament to the extreme flexibility
 of the [[https://www.racket-lang.org/][Racket Language]] that their Web Framework
 can be used in a manner so different from its original design.
+** Availability Of This Document
+
+This document is normally available at all the following urls:
+- Codeberg :: 
+- GitLab :: 
+- GitHub ::
+  - GitHub is currently failing to correctly process OrgMode documents.
+  - as of 2026-10-01
+
+Please consult the LICENCE or LICENSE.org or LICENSE.md file at the
+top of this repository for freedoms and restrictions in your use of
+the contents of this repository, including this document.
+
+Even when not required, we would appreciate
+- attribution with a reference to our respository,
+- your sending us any improvements you make to these materials,
+- information about any significant usage of these materials in your projects,
+- and thank you!
